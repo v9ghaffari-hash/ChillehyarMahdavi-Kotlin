@@ -23,10 +23,11 @@ jobs:
 
       - name: Extract project ZIP
         run: |
+          set -e
           test -f Chillehyar_Kotlin_GitReady_v1.2.zip
           unzip -o Chillehyar_Kotlin_GitReady_v1.2.zip -d .
-          rm Chillehyar_Kotlin_GitReady_v1.2.zip
-          rm -f .github/workflows/extract-project.yml
+          rm -f Chillehyar_Kotlin_GitReady_v1.2.zip
+          rm -f .github/workflows/build.yml
 
       - name: Commit extracted project
         run: |
