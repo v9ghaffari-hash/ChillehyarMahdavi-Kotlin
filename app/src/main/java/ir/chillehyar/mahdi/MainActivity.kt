@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -635,10 +637,23 @@ class MainActivity : ComponentActivity() {
                 }, Modifier.fillMaxWidth())
             }
             PremiumCard { SectionTitle("بررسی‌های ذخیره‌شده")
-                val records = prefs.all.filterKeys { it.startsWith("tactic_") }.toList().sortedByDescending { it.first }
-                if(records.isEmpty()) Text("هنوز بررسی‌ای ثبت نشده است.", color = Muted)
-                records.forEach { (key, raw) ->
-                    try { val o = JSONObject(raw as String); Column(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(13.dp)).background(Cream).padding(12.dp)) { Text(o.optString("name"), color = Forest, fontWeight = FontWeight.Bold); Text("${o.optString("date")} · ${o.optJSONArray("causes")?.length() ?: 0} علت", color = Muted, fontSize = 11.sp); Text(o.optString("solution"), fontSize = 13.sp, lineHeight = 20.sp); TextButton(onClick = { prefs.edit().remove(key).apply(); revision++ }) { Text("حذف بررسی", color = Rose) } } } catch (_: Exception) { }
+                val records = prefs.all
+                    .filterKeys { it.startsWith("tactic_") }
+                    .toList()
+                    .sortedByDescending { it.first }
+                    .mapNotNull { (key, raw) ->
+                        val json = raw as? String ?: return@mapNotNull null
+                        val parsed = try { JSONObject(json) } catch (_: Exception) { null }
+                        parsed?.let { key to it }
+                    }
+                if (records.isEmpty()) Text("هنوز بررسی‌ای ثبت نشده است.", color = Muted)
+                records.forEach { (key, o) ->
+                    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(13.dp)).background(Cream).padding(12.dp)) {
+                        Text(o.optString("name"), color = Forest, fontWeight = FontWeight.Bold)
+                        Text("${o.optString("date")} · ${o.optJSONArray("causes")?.length() ?: 0} علت", color = Muted, fontSize = 11.sp)
+                        Text(o.optString("solution"), fontSize = 13.sp, lineHeight = 20.sp)
+                        TextButton(onClick = { prefs.edit().remove(key).apply(); revision++ }) { Text("حذف بررسی", color = Rose) }
+                    }
                 }
             }
         }
