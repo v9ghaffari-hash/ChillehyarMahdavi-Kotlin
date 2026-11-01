@@ -1,0 +1,59 @@
+
+name: Extract Android Project ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE="ChillehyarMahdavi_Native_Kotlin_Advanced_v31.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ZIP file not found: $ZIP_FILE"
+            ls -la
+            exit 1
+          fi
+
+          mkdir -p /tmp/chillehyar-project
+          unzip -q "$ZIP_FILE" -d /tmp/chillehyar-project
+
+          PROJECT_DIR="$(dirname "$(find /tmp/chillehyar-project -type f -name settings.gradle.kts -print -quit)")"
+
+          if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/gradlew" ]; then
+            echo "Android project or gradlew not found in ZIP"
+            find /tmp/chillehyar-project -maxdepth 3 -type f | head -100
+            exit 1
+          fi
+
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='*.zip' \
+            "$PROJECT_DIR/" ./
+
+          chmod +x gradlew
+
+      - name: Commit extracted project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Install native Kotlin v31 project"
+            git push
+          fi
