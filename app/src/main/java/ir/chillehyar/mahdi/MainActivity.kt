@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -98,6 +99,17 @@ class MainActivity : ComponentActivity() {
         reminderHour = prefs.getInt("reminder_hour", 8)
         reminderMinute = prefs.getInt("reminder_minute", 0)
         createNotificationChannel()
+        // Rebuild alarms when the app is opened as a safety net after updates or device-specific alarm cleanup.
+        if (reminderEnabled) ReminderReceiver.schedule(this, prefs)
+        habitNames().forEachIndexed { index, name ->
+            if (prefs.getBoolean("habit_reminder_${index}_on", false)) {
+                ReminderReceiver.scheduleHabit(
+                    this, index, name,
+                    prefs.getString("habit_reminder_${index}_time", "20:00") ?: "20:00",
+                    prefs.getString("habit_reminder_${index}_text", "") ?: ""
+                )
+            }
+        }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 29)
         }
@@ -227,13 +239,16 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun ChillehyarApp() {
+        // Read revision to trigger redraws without recreating the whole page/scroll state.
+        val observedRevision = revision
         val palette = listOf(Color(0xFF173A31), Color(0xFF176B55), Color(0xFF2F6FBA), Color(0xFF7B61A8), Color(0xFFB96865), Color(0xFF946C2E))
         val chosenPrimary = palette[themeChoice.coerceIn(0, palette.lastIndex)]
         val density = LocalDensity.current
         MaterialTheme(colorScheme = lightColorScheme(primary = chosenPrimary, secondary = Gold, background = Cream, surface = CardCream, onPrimary = Color.White, onBackground = Ink, onSurface = Ink)) {
             CompositionLocalProvider(LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl, LocalDensity provides androidx.compose.ui.unit.Density(density.density, uiScale.coerceIn(.9f,1.2f))) {
                 Scaffold(containerColor = Cream, bottomBar = { BottomNavigationBar(page) { page = it } }) { padding ->
-                    key(revision, page) {
+                    if (observedRevision < 0) Spacer(Modifier.height(0.dp))
+                    key(page) {
                         Column(Modifier.fillMaxSize().padding(padding)) {
                             HeaderBar(page)
                             when (page) {
@@ -368,7 +383,7 @@ class MainActivity : ComponentActivity() {
         var showDeleteConfirm by remember(habit) { mutableStateOf(false) }
         var reminderOn by remember(habit) { mutableStateOf(prefs.getBoolean("habit_reminder_${habit}_on", false)) }
         var reminderTime by remember(habit) { mutableStateOf(prefs.getString("habit_reminder_${habit}_time", "20:00") ?: "20:00") }
-        var reminderText by remember(habit) { mutableStateOf(prefs.getString("habit_reminder_${habit}_text", "") ?: "") }
+        var reminderText by remember(habit) { mutableStateOf(prefs.getString("habit_reminder_${habit}_text", ReminderReceiver.MESSAGES[habit % ReminderReceiver.MESSAGES.size]) ?: ReminderReceiver.MESSAGES[habit % ReminderReceiver.MESSAGES.size]) }
         ScrollPage {
             PremiumCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -399,40 +414,48 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(8.dp)); PrimaryButton("ذخیرهٔ هدف‌ها", { prefs.edit().putString("hmeta_${habit}_target",target).putString("hmeta_${habit}_special",specialTarget).putString("hmeta_${habit}_emergency",emergencyTarget).apply(); revision++; Toast.makeText(this@MainActivity,"هدف‌های عادت ذخیره شد",Toast.LENGTH_SHORT).show() }, Modifier.fillMaxWidth())
             }
             PremiumCard {
-                SectionTitle("جدول ۴۰۰ قدم", "از چپ به راست حرکت کن؛ هر خانه چهار وضعیت دارد")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                SectionTitle("جدول پیگیری ۴۰۰ قدم", "۱۰ لقمهٔ کوچک؛ برای هر لقمه، ۴۰ خانهٔ روزانه")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                     LegendPill("خالی", Color(0xFFE8ECE8)); LegendPill("✓ کوچک", Color(0xFF3D8B6E)); LegendPill("★ ویژه", Color(0xFFD6A64D)); LegendPill("! اضطراری", Color(0xFFB96865))
                 }
                 Spacer(Modifier.height(10.dp))
                 (0 until 10).forEach { row ->
                     var rowTarget by remember(habit,row) { mutableStateOf(prefs.getString("h400_row_${habit}_$row", "") ?: "") }
-                    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(15.dp)).background(Cream).padding(9.dp)) {
-                        Text("ردیف ${row+1} از ۱۰ · هدف این ردیف", fontSize = 12.sp, color = Forest, fontWeight = FontWeight.Bold)
-                        OutlinedTextField(rowTarget, { rowTarget = it; prefs.edit().putString("h400_row_${habit}_$row",it).apply() }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("مثلاً: ۵ دقیقه یا ۳ آیه", fontSize = 11.sp) }, shape = RoundedCornerShape(10.dp))
-                        Spacer(Modifier.height(8.dp))
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            (0 until 40).forEach { col ->
-                                val idx = row*40+col
-                                val value = prefs.getString("h400_${habit}_$idx", "") ?: ""
-                                val bg = when(value) { "s" -> Color(0xFF3D8B6E); "v" -> Color(0xFFD6A64D); "e" -> Color(0xFFB96865); else -> Color.White }
-                                Box(Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(bg).border(1.dp, if(value.isEmpty()) Color(0xFFD6DED7) else bg, RoundedCornerShape(8.dp)).clickable {
-                                    val next = when(value) { "" -> "s"; "s" -> "v"; "v" -> "e"; else -> "" }
-                                    prefs.edit().putString("h400_${habit}_$idx",next).apply(); revision++
-                                }, contentAlignment = Alignment.Center) {
-                                    Text(when(value) { "s" -> "✓"; "v" -> "★"; "e" -> "!"; else -> (idx+1).toString() }, color = if(value.isEmpty()) Muted else Color.White, fontSize = if(value.isEmpty()) 9.sp else 14.sp, fontWeight = FontWeight.Bold)
+                    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(17.dp)).background(Cream).border(1.dp, PaleGold, RoundedCornerShape(17.dp)).padding(11.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(30.dp).clip(CircleShape).background(Forest), contentAlignment = Alignment.Center) { Text("${row+1}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                            Spacer(Modifier.width(8.dp))
+                            Text("لقمهٔ کوچک ${row+1}", fontSize = 13.sp, color = Forest, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(7.dp))
+                        OutlinedTextField(rowTarget, { rowTarget = it; prefs.edit().putString("h400_row_${habit}_$row",it).apply() }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("مثلاً: ۵ دقیقه قرآن یا ۳ آیه", fontSize = 11.sp) }, shape = RoundedCornerShape(10.dp))
+                        Spacer(Modifier.height(9.dp))
+                        (0 until 40).chunked(5).forEach { week ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                week.forEach { col ->
+                                    val idx = row*40+col
+                                    val value = prefs.getString("h400_${habit}_$idx", "") ?: ""
+                                    val bg = when(value) { "s" -> Color(0xFF3D8B6E); "v" -> Color(0xFFD6A64D); "e" -> Color(0xFFB96865); else -> Color.White }
+                                    Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(9.dp)).background(bg).border(1.dp, if(value.isEmpty()) Color(0xFFD6DED7) else bg, RoundedCornerShape(9.dp)).clickable {
+                                        val next = when(value) { "" -> "s"; "s" -> "v"; "v" -> "e"; else -> "" }
+                                        prefs.edit().putString("h400_${habit}_$idx",next).apply(); revision++
+                                    }, contentAlignment = Alignment.Center) {
+                                        Text(when(value) { "s" -> "✓"; "v" -> "★"; "e" -> "!"; else -> (idx+1).toString() }, color = if(value.isEmpty()) Muted else Color.White, fontSize = if(value.isEmpty()) 10.sp else 14.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
+                            Spacer(Modifier.height(5.dp))
                         }
                     }
                 }
-                Text("لمس خانه‌ها به ترتیب: خالی ← لقمه کوچک ← لقمه ویژه ← لقمه اضطراری ← خالی", fontSize = 11.sp, color = Muted)
+                Text("برای هر خانه لمس کن: خالی ← لقمه کوچک ✓ ← لقمه ویژه ★ ← لقمه اضطراری ! ← خالی", fontSize = 11.sp, color = Muted, lineHeight = 17.sp)
             }
             PremiumCard {
                 SectionTitle("یادآور اختصاصی این عادت")
                 Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("یادآوری برای ${names[habit]}", fontWeight = FontWeight.Bold); Text("تنظیم مستقل برای این عادت", fontSize = 11.sp, color = Muted) }; Switch(reminderOn, { reminderOn = it }) }
                 OutlinedTextField(reminderTime, { reminderTime = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ساعت (مثلاً 20:00)") }, singleLine = true)
                 Spacer(Modifier.height(7.dp)); OutlinedTextField(reminderText, { reminderText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("پیام یادآور") }, singleLine = true)
-                Spacer(Modifier.height(8.dp)); PrimaryButton("ذخیره تنظیمات یادآور", { prefs.edit().putBoolean("habit_reminder_${habit}_on",reminderOn).putString("habit_reminder_${habit}_time",reminderTime).putString("habit_reminder_${habit}_text",reminderText).apply(); configureHabitReminder(habit,names[habit],reminderOn,reminderTime,reminderText.ifBlank { "یک قدم کوچک برای عادت ${names[habit]} بردار." }); revision++; Toast.makeText(this@MainActivity,if(reminderOn) "یادآور اختصاصی این عادت زمان‌بندی شد" else "یادآور اختصاصی غیرفعال شد",Toast.LENGTH_LONG).show() }, Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp)); PrimaryButton("ذخیره تنظیمات یادآور", { prefs.edit().putBoolean("habit_reminder_${habit}_on",reminderOn).putString("habit_reminder_${habit}_time",reminderTime).putString("habit_reminder_${habit}_text",reminderText).apply(); configureHabitReminder(habit,names[habit],reminderOn,reminderTime,reminderText.ifBlank { ReminderReceiver.MESSAGES[habit % ReminderReceiver.MESSAGES.size] }); revision++; Toast.makeText(this@MainActivity,if(reminderOn) "یادآور اختصاصی این عادت زمان‌بندی شد" else "یادآور اختصاصی غیرفعال شد",Toast.LENGTH_LONG).show() }, Modifier.fillMaxWidth())
             }
             PremiumCard {
                 SectionTitle("یادداشت و بازتاب مسیر")
@@ -512,18 +535,57 @@ class MainActivity : ComponentActivity() {
                 Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) { TextButton(onClick = { minute = (minute + 55) % 60 }) { Text("−۵ دقیقه") }; TextButton(onClick = { minute = (minute + 5) % 60 }) { Text("+۵ دقیقه") } }
                 Spacer(Modifier.height(8.dp)); PrimaryButton("ذخیره و فعال‌سازی", { configureReminder(enabled,hour,minute); Toast.makeText(this@MainActivity, if (enabled) "یادآور ذخیره شد" else "یادآور غیرفعال شد", Toast.LENGTH_LONG).show() }, Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp)); OutlinedButton(onClick = { showTestNotification() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Filled.NotificationsActive, null); Spacer(Modifier.width(8.dp)); Text("آزمایش اعلان") }
+                Spacer(Modifier.height(6.dp)); TextButton(onClick = { openNotificationSettings() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Filled.Settings, null); Spacer(Modifier.width(6.dp)); Text("بررسی مجوز و تنظیمات اعلان") }
             }
             PremiumCard { SectionTitle("نکتهٔ مهم")
                 Text("برای نمایش اعلان، مجوز اعلان‌های برنامه را در تنظیمات اندروید فعال نگه دار. بعضی گوشی‌ها برای اجرای دقیق در پس‌زمینه، تنظیمات باتری جداگانه دارند.", fontSize = 13.sp, color = Muted)
             }
         }
     }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 30) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                showTestNotification()
+            } else {
+                Toast.makeText(this, "برای نمایش اعلان آزمایشی، مجوز اعلان را در تنظیمات برنامه فعال کن.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun openNotificationSettings() {
+        try {
+            val intent = if (Build.VERSION.SDK_INT >= 26) {
+                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, ReminderReceiver.CHANNEL)
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
+    }
+
     private fun showTestNotification() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 29); Toast.makeText(this, "مجوز اعلان را تأیید کن و دوباره آزمایش کن", Toast.LENGTH_LONG).show(); return }
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 30)
+            Toast.makeText(this, "برای آزمایش، مجوز اعلان را در پنجرهٔ اندروید فعال کن.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled() || (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(ReminderReceiver.CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE)) {
+            Toast.makeText(this, "اعلان‌های برنامه یا کانال آن خاموش است؛ تنظیمات اعلان باز می‌شود.", Toast.LENGTH_LONG).show()
+            openNotificationSettings()
+            return
+        }
+        val message = ReminderReceiver.MESSAGES[(Calendar.getInstance().get(Calendar.DAY_OF_YEAR) + 3) % ReminderReceiver.MESSAGES.size]
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, ReminderReceiver.CHANNEL) else Notification.Builder(this)
-        val notification = builder.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("چله‌یار مهدوی").setContentText("وقت عهد امروز و یک قدم به سوی بهتر شدن است.").setAutoCancel(true).build()
-        getSystemService(NotificationManager::class.java).notify(2029, notification)
-        Toast.makeText(this, "درخواست اعلان آزمایشی ارسال شد", Toast.LENGTH_SHORT).show()
+        val notification = builder.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("چله‌یار مهدوی · پیام امروز")
+            .setContentText(message).setStyle(Notification.BigTextStyle().bigText(message)).setAutoCancel(true).build()
+        manager.notify(2029, notification)
+        Toast.makeText(this, "اعلان آزمایشی ارسال شد؛ اگر دیده نشد تنظیمات اعلان و مزاحم‌نشدن را بررسی کن.", Toast.LENGTH_LONG).show()
     }
 
     @Composable private fun SettingsPage() {
@@ -671,7 +733,7 @@ class ReminderReceiver : android.content.BroadcastReceiver() {
         if (intent?.action == "ir.chillehyar.mahdi.HABIT_REMINDER") {
             val index = intent.getIntExtra("habit_index",0)
             val name = intent.getStringExtra("habit_name") ?: "عادت روزانه"
-            val message = intent.getStringExtra("habit_message")?.takeIf { it.isNotBlank() } ?: "یک قدم کوچک امروز هم ارزشمند است."
+            val message = intent.getStringExtra("habit_message")?.takeIf { it.isNotBlank() } ?: MESSAGES[(Calendar.getInstance().get(Calendar.DAY_OF_YEAR) + index) % MESSAGES.size]
             val time = intent.getStringExtra("habit_time") ?: "20:00"
             val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL) else Notification.Builder(context)
             manager.notify(10000 + index, b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("چله‌یار · $name").setContentText(message).setAutoCancel(true).build())
@@ -680,12 +742,30 @@ class ReminderReceiver : android.content.BroadcastReceiver() {
         }
         if (!prefs.getBoolean("reminder_enabled", false)) return
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL) else Notification.Builder(context)
-        manager.notify(4002, b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("چله‌یار مهدوی").setContentText("وقت عهد امروز و یک قدم به سوی بهتر شدن است.").setAutoCancel(true).build())
+        val message = MESSAGES[Calendar.getInstance().get(Calendar.DAY_OF_YEAR) % MESSAGES.size]
+        manager.notify(4002, b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("چله‌یار مهدوی · یادآوری عهد").setContentText(message).setStyle(Notification.BigTextStyle().bigText(message)).setAutoCancel(true).build())
         schedule(context, prefs)
     }
     companion object {
-        const val CHANNEL = "chillehyar_native_v31"
+        const val CHANNEL = "chillehyar_native_v32"
         const val REQUEST_CODE = 730
+        val MESSAGES = listOf(
+            "امروز را با سلامی به امام زمان (عج) آغاز کن؛ یک قدم کوچک کافی است.",
+            "اللهم عجل لولیک الفرج؛ امروز یک کار خوب را به نیت رضایت خدا انجام بده.",
+            "یار امام زمان بودن از یک انتخاب پاک در همین لحظه آغاز می‌شود.",
+            "آیا امروز برای فرج دعا کردی؟ چند لحظه با دل حاضر دعا کن.",
+            "امروز دل کسی را شاد کن؛ شاید همین قدم کوچک، عهدی روشن باشد.",
+            "برای تعجیل فرج دعا کن و سهم خودت از اصلاح را فراموش نکن.",
+            "یک صلوات، یک دعای فرج، یک کار نیک؛ عهد امروزت را زنده نگه دار.",
+            "امام زمان (عج) را با عمل صالح به یاد بیاور؛ قدمی هرچند کوچک بردار.",
+            "خدایا ما را از یاران راستین و زمینه‌سازان فرج قرار بده.",
+            "امروز با مهربانی، امانت‌داری و دوری از گناه به عهدت وفا کن.",
+            "دعای عهد را با توجه بخوان؛ امید را در رفتار امروزت جاری کن.",
+            "فرج را بخواه و برای بهتر شدن خودت هم یک تصمیم عملی بگیر.",
+            "هر قدم صادقانه در مسیر بندگی ارزشمند است؛ ناامید نشو.",
+            "به نیت تعجیل فرج، به خانواده‌ات محبت کن و حق کسی را رعایت کن.",
+            "سلام بر امام زمان (عج)؛ امروز را با نیت پاک و امید آغاز کن."
+        )
         fun schedule(context: Context, prefs: android.content.SharedPreferences) {
             val alarm = context.getSystemService(AlarmManager::class.java)
             val pi = PendingIntent.getBroadcast(context, REQUEST_CODE, Intent(context, ReminderReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
