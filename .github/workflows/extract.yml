@@ -14,8 +14,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
 
-      - name: Extract and locate Android project
+      - name: Extract project ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -23,8 +26,8 @@ jobs:
           ZIP_FILE="ChillehyarMahdavi_Native_Kotlin_Advanced_v31.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found."
-            find . -maxdepth 2 -type f
+            echo "ERROR: ZIP file not found: $ZIP_FILE"
+            ls -la
             exit 1
           fi
 
@@ -32,11 +35,12 @@ jobs:
           unzip -oq "$ZIP_FILE" -d /tmp/chillehyar_v31
 
           SETTINGS_FILE="$(find /tmp/chillehyar_v31 \
-            -type f \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
             -print -quit)"
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Gradle settings file not found."
+            echo "ERROR: Gradle settings file not found in ZIP."
             find /tmp/chillehyar_v31 -maxdepth 4 -type f
             exit 1
           fi
@@ -44,35 +48,55 @@ jobs:
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
 
           echo "Project directory: $PROJECT_DIR"
-          echo "Settings file: $SETTINGS_FILE"
-          ls -la "$PROJECT_DIR"
+          echo "Gradle settings: $SETTINGS_FILE"
+
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: app directory not found."
+            ls -la "$PROJECT_DIR"
+            exit 1
+          fi
 
           rsync -a \
             --exclude='.git/' \
+            --exclude='.github/' \
             --exclude='*.zip' \
             "$PROJECT_DIR/" ./
 
-      - name: Check extracted project
+          echo "Project files copied."
+          ls -la
+
+      - name: Validate project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
           test -d app
-          test -f gradlew || {
-            echo "WARNING: Gradle wrapper gradlew is missing."
-          }
-          ls -la
-          ls -la app
+          test -f settings.gradle.kts || test -f settings.gradle
+
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            echo "Gradle wrapper found."
+          else
+            echo "WARNING: gradlew is missing."
+          fi
+
+          echo "Project validation completed."
 
       - name: Commit extracted project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Extract native Kotlin v31 project"
-            git push
-          else
+
+          if git diff --cached --quiet; then
             echo "No changes to commit."
+            exit 0
           fi
+
+          git commit -m "Extract native Kotlin v31 project"
+          git push origin HEAD:main
