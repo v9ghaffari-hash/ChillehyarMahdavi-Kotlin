@@ -264,6 +264,7 @@ class MainActivity : ComponentActivity() {
                                 "جدول فضیلت‌ها" -> VirtuePage()
                                 "افزایش انگیزه" -> MotivationPage()
                                 "تحلیل لغزش" -> TacticsPage()
+                                "جدول تحلیل‌ها" -> HabitAnalysisTablePage()
                                 else -> SettingsPage()
                             }
                         }
@@ -287,7 +288,7 @@ class MainActivity : ComponentActivity() {
         val items = listOf("خانه" to Icons.Filled.Home, "چله من" to Icons.Filled.CalendarMonth, "عادت‌ها" to Icons.Filled.CheckCircle, "ثبت روزانه" to Icons.Filled.EditNote, "بیشتر" to Icons.Filled.Menu)
         NavigationBar(containerColor = CardCream, contentColor = Forest, tonalElevation = 8.dp) {
             items.forEach { (label, icon) ->
-                NavigationBarItem(selected = if (label == "بیشتر") selected in listOf("یادداشت‌ها", "گزارش", "یادآورها", "تنظیمات", "ابزارهای پیشرفته", "جدول فضیلت‌ها", "افزایش انگیزه", "تحلیل لغزش") else selected == label, onClick = { if (label == "بیشتر") page = "ابزارهای پیشرفته" else onSelect(label) }, icon = { Icon(icon, null) }, label = { Text(label, fontSize = 10.sp) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Forest, selectedTextColor = Forest, indicatorColor = PaleGold, unselectedIconColor = Muted))
+                NavigationBarItem(selected = if (label == "بیشتر") selected in listOf("یادداشت‌ها", "گزارش", "یادآورها", "تنظیمات", "ابزارهای پیشرفته", "جدول فضیلت‌ها", "افزایش انگیزه", "تحلیل لغزش", "جدول تحلیل‌ها") else selected == label, onClick = { if (label == "بیشتر") page = "ابزارهای پیشرفته" else onSelect(label) }, icon = { Icon(icon, null) }, label = { Text(label, fontSize = 10.sp) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Forest, selectedTextColor = Forest, indicatorColor = PaleGold, unselectedIconColor = Muted))
             }
         }
     }
@@ -505,6 +506,75 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable private fun HabitAnalysisTablePage() {
+        val names = habitNames()
+        val daysConsidered = currentDay().coerceIn(1, 40)
+        val headers = listOf(
+            "نام عادت", "تعداد روزهای محاسبه", "تعداد لقمه کوچک", "تعداد لقمه ویژه",
+            "تعداد لقمه اضطراری", "تعداد شکست", "ویژه روز هنگام", "اضطراری روز هنگام",
+            "ویژه بیش از حد", "اضطراری بیش از حد"
+        )
+        val headerColors = listOf(
+            Color(0xFFF2B5AE), Color(0xFFF6D3B0), Color(0xFFB9D8B2), Color(0xFFF7DFA0),
+            Color(0xFFC9CDCA), Color(0xFFBFC9E3), Color(0xFFE5B9D0), Color(0xFFF5CBA9),
+            Color(0xFFBDE1DB), Color(0xFFC8C2D7)
+        )
+        ScrollPage {
+            PremiumCard {
+                SectionTitle("جدول تحلیل عادت‌ها", "نمای کلی هر عادت بر اساس ثبت‌های جدول ۴۰۰ خانه‌ای")
+                Text("جدول را به چپ و راست بکش تا همهٔ ستون‌ها را ببینی. محاسبه تا روز ${daysConsidered} چله انجام می‌شود.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+                Spacer(Modifier.height(12.dp))
+                Column(Modifier.horizontalScroll(rememberScrollState())) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        headers.forEachIndexed { index, title ->
+                            Box(Modifier.width(if (index == 0) 118.dp else 104.dp).height(62.dp).clip(RoundedCornerShape(topStart = 13.dp, topEnd = 13.dp)).background(headerColors[index]).padding(6.dp), contentAlignment = Alignment.Center) {
+                                Text(title, color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 13.sp)
+                            }
+                        }
+                    }
+                    names.forEachIndexed { habit, name ->
+                        val perDay = (0 until daysConsidered).map { day ->
+                            (0 until 10).map { row -> prefs.getString("h400_${habit}_${row * 40 + day}", "") ?: "" }
+                        }
+                        val smallCount = perDay.sumOf { day -> day.count { it == "s" } }
+                        val specialCount = perDay.sumOf { day -> day.count { it == "v" } }
+                        val emergencyCount = perDay.sumOf { day -> day.count { it == "e" } }
+                        val failures = perDay.count { day -> day.none { it.isNotEmpty() } }
+                        val specialDays = perDay.count { day -> day.any { it == "v" } }
+                        val emergencyDays = perDay.count { day -> day.any { it == "e" } }
+                        val specialOver = perDay.count { day -> day.count { it == "v" } > 1 }
+                        val emergencyOver = perDay.count { day -> day.count { it == "e" } > 1 }
+                        val values = listOf(name, daysConsidered.toString(), smallCount.toString(), specialCount.toString(), emergencyCount.toString(), failures.toString(), specialDays.toString(), emergencyDays.toString(), specialOver.toString(), emergencyOver.toString())
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+                            values.forEachIndexed { index, value ->
+                                Box(Modifier.width(if (index == 0) 118.dp else 104.dp).height(58.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFE8F2ED)).padding(5.dp), contentAlignment = Alignment.Center) {
+                                    Text(value, color = Ink, fontSize = if (index == 0) 11.sp else 14.sp, fontWeight = if (index == 0) FontWeight.Bold else FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 3, lineHeight = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("تعریف محاسبه: شکست = روزی که هیچ‌یک از ۱۰ ریزکار آن ثبت نشده؛ روز ویژه/اضطراری = روز دارای دست‌کم یک ثبت از همان نوع؛ بیش از حد = روز دارای بیش از یک ثبت از همان نوع.", color = Muted, fontSize = 11.sp, lineHeight = 18.sp)
+            }
+            PremiumCard {
+                SectionTitle("تحلیل‌ها", "پنج جایگاه برای ثبت برداشت‌ها و تصمیم‌های بعدی")
+                (1..5).forEach { number ->
+                    var analysisText by remember(number) { mutableStateOf(prefs.getString("habit_analysis_note_$number", "") ?: "") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(34.dp).clip(CircleShape).background(listOf(Color(0xFFF6D3B0), Color(0xFFF7DFA0), Color(0xFFF2B5AE), Color(0xFFB9D8B2), Color(0xFFBDE1DB))[number - 1]), contentAlignment = Alignment.Center) {
+                            Text(number.toString(), color = Forest, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(value = analysisText, onValueChange = { analysisText = it; prefs.edit().putString("habit_analysis_note_$number", it).apply() }, modifier = Modifier.weight(1f), label = { Text("تحلیل شمارهٔ $number") }, minLines = 2, shape = RoundedCornerShape(12.dp))
+                    }
+                    Spacer(Modifier.height(9.dp))
+                }
+                Text("یادداشت‌ها با هر تغییر به‌صورت خودکار در گوشی ذخیره می‌شوند.", color = Muted, fontSize = 11.sp)
+            }
+        }
+    }
+
     @Composable private fun ReportsPage() {
         val totalTasks = (1..40).sumOf { dayDoneCount(it) }; val totalPossible = 40 * dailyTasks.size
         val habitDone = habitNames().indices.sumOf { h -> (0 until 400).count { prefs.getString("h400_${h}_$it", "") != "" } }
@@ -621,6 +691,8 @@ class MainActivity : ComponentActivity() {
                 ToolRow("🌱", "چک‌لیست افزایش انگیزه", "۱۶ عامل انگیزشی با سابقهٔ روزانه", { page = "افزایش انگیزه" })
                 Divider(color = PaleGold)
                 ToolRow("🧭", "بررسی عادت و علت لغزش", "ثبت علت‌ها، راهکارها و مرور بررسی‌های قبلی", { page = "تحلیل لغزش" })
+                Divider(color = PaleGold)
+                ToolRow("📊", "جدول تحلیل عادت‌ها", "مقایسهٔ لقمه‌ها، روزهای ثبت‌شده و شاخص‌های هر عادت", { page = "جدول تحلیل‌ها" })
                 Divider(color = PaleGold)
                 ToolRow("📈", "گزارش و کارنامه", "خانه‌های کوچک، ویژه، اضطراری و پیشرفت هر عادت", { page = "گزارش" })
                 Divider(color = PaleGold)

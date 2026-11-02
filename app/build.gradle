@@ -11,8 +11,8 @@ android {
         applicationId 'ir.chillehyar.mahdi.next'
         minSdk 23
         targetSdk 35
-        versionCode 33
-        versionName '33.0-native-independent'
+        versionCode 34
+        versionName '34.0-analysis-table'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
