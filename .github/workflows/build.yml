@@ -23,15 +23,20 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
 
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Extract Android project
         run: |
           mkdir -p android-project
+
           if [ -f "YarShodan.zip" ]; then
             unzip -q YarShodan.zip -d android-project
           elif [ -f "project.zip" ]; then
@@ -45,12 +50,17 @@ jobs:
       - name: Find Gradle project
         run: |
           GRADLE_FILE=$(find android-project -name gradlew -type f | head -n 1)
+
           if [ -z "$GRADLE_FILE" ]; then
             echo "ERROR: gradlew not found in ZIP"
-            find android-project -maxdepth 4 -type f | head -100
+            find android-project -maxdepth 5 -type f | head -100
             exit 1
           fi
-          echo "PROJECT_DIR=$(dirname "$GRADLE_FILE")" >> $GITHUB_ENV
+
+          PROJECT_DIR=$(dirname "$GRADLE_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project found at: $PROJECT_DIR"
 
       - name: Build APK
         run: |
@@ -62,5 +72,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Chillehyar-APK
-          path: android-project/**/*.apk
+          path: android-project/**/build/outputs/apk/**/*.apk
           if-no-files-found: error
