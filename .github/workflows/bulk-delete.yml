@@ -1,0 +1,39 @@
+name: Bulk Delete Files
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: Repository paths to delete, one per line
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Delete selected paths
+        shell: bash
+        env:
+          DELETE_PATHS: ${{ inputs.paths }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            [[ "$path" == /* || "$path" == .git || "$path" == .git/* ]] && { echo "Rejected unsafe path: $path"; exit 1; }
+            IFS="/" read -ra parts <<< "$path"
+            for part in "${parts[@]}"; do [[ "$part" == ".." || "$part" == "." || -z "$part" ]] && { echo "Rejected unsafe path: $path"; exit 1; }; done
+            git rm -r --ignore-unmatch -- "$path" || true
+          done <<< "$DELETE_PATHS"
+          if git diff --cached --quiet; then
+            echo "No tracked files matched the selected paths."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Delete selected files and folders"
+          git push origin "HEAD:refs/heads/${{ github.ref_name }}"
