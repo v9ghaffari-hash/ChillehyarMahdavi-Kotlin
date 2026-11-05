@@ -19,7 +19,7 @@
 - Android SDK Platform 36
 - Android Build Tools 36.0.0
 - Gradle 8.11.1
-
+ 
 اصلاحات این بسته:
 - اصلاح امضای onRequestPermissionsResult برای سازگاری با AndroidX Activity.
 - اصلاح Workflow برای نصب بسته‌های SDK مشخص و جلوگیری از درخواست بسته منسوخ tools.
